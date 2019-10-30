@@ -20,11 +20,13 @@ namespace common {
 
 OperationManager::OperationManager(ParameterManager* param_manager,
                                    std::vector<std::shared_ptr<AllreduceOp>> allreduce_ops,
+                                   std::vector<std::shared_ptr<ScatterReduceOp>> scatter_reduce_ops,
                                    std::vector<std::shared_ptr<AllgatherOp>> allgather_ops,
                                    std::vector<std::shared_ptr<BroadcastOp>> broadcast_ops,
                                    std::shared_ptr<ErrorOp> error_op)
     : param_manager_(param_manager),
       allreduce_ops_(std::move(allreduce_ops)),
+      scatter_reduce_ops_(std::move(scatter_reduce_ops))
       allgather_ops_(std::move(allgather_ops)),
       broadcast_ops_(std::move(broadcast_ops)),
       error_op_(std::move(error_op)) {}
@@ -37,6 +39,16 @@ Status OperationManager::ExecuteAllreduce(std::vector<TensorTableEntry>& entries
     }
   }
   throw std::logic_error("No Allreduce operation enabled");
+}
+
+Status OperationManager::ExecuteScatterReduce(std::vector<TensorTableEntry>& entries,
+                                              const Response& response) const {
+  for (auto& op : scatter_reduce_ops_) {
+    if (op->Enabled(*param_manager_, entries, response)) {
+      return op->Execute(entries, response);
+    }
+  }
+  throw std::logic_error("No ScatterReduce operation enabled");
 }
 
 Status OperationManager::ExecuteAllgather(std::vector<TensorTableEntry>& entries,
@@ -68,6 +80,8 @@ Status OperationManager::ExecuteOperation(std::vector<TensorTableEntry>& entries
                                           const Response& response) const {
   if (response.response_type() == Response::ALLREDUCE) {
     return ExecuteAllreduce(entries, response);
+  } else if (response.response_type() == Response::ScatterReduce) {
+    return ExecuteScatterReduce(entries, response);
   } else if (response.response_type() == Response::ALLGATHER) {
     return ExecuteAllgather(entries, response);
   } else if (response.response_type() == Response::BROADCAST) {

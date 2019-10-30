@@ -126,6 +126,59 @@ def allreduce_(tensor, average=True, name=None, priority=0):
     return tensor
 
 
+def scatter_reduce(tensor, name=None, priority=0):
+    """
+    Arguments:
+        tensor: A tensor to average and sum.
+        name: A name of the reduction operation.
+        priority: The priority of this operation. Higher priority operations
+                  are likely to be executed before other operations.
+
+    Returns:
+        A tensor of the same shape and type as `tensor`, averaged or summed
+        across all processes.
+    """
+    output = mx.nd.zeros(shape=tensor.shape, ctx=tensor.context,
+                         dtype=tensor.dtype)
+    c_in = tensor.handle
+    c_out = output.handle
+    if isinstance(name, string_types):
+        check_call(MPI_MXNET_LIB_CTYPES.horovod_mxnet_scatter_reduce_async(
+            c_in, c_out, c_str(name), ctypes.c_int(priority)))
+    else:
+        check_call(MPI_MXNET_LIB_CTYPES.horovod_mxnet_allreduce_async(
+            c_in, c_out, name, ctypes.c_int(priority)))
+
+    return output
+
+
+def scatter_reduce_(tensor, name=None, priority=0):
+    """
+    A function that performs in-place scatter reduce of the input
+    tensor over all the Horovod processes.
+
+    Arguments:
+        tensor: A tensor to average and sum.
+        name: A name of the reduction operation.
+        priority: The priority of this operation. Higher priority operations
+                  are likely to be executed before other operations.
+
+    Returns:
+        A tensor of the same shape and type as `tensor`, averaged or summed
+        across all processes.
+    """
+    c_in = tensor.handle
+    c_out = tensor.handle
+    if isinstance(name, string_types):
+        check_call(MPI_MXNET_LIB_CTYPES.horovod_mxnet_scatter_reduce_async(
+            c_in, c_out, c_str(name), ctypes.c_int(priority)))
+    else:
+        check_call(MPI_MXNET_LIB_CTYPES.horovod_mxnet_allreduce_async(
+            c_in, c_out, name, ctypes.c_int(priority)))
+
+    return tensor
+
+
 def allgather(tensor, name=None, priority=0):
     """
     A function that concatenates the input tensor with the same input tensor on

@@ -74,6 +74,39 @@ protected:
                              TensorTableEntry& e);
 };
 
+class ScatterReduceOp : public HorovodOp {
+public:
+  ScatterReduceOp(HorovodGlobalState* global_state);
+
+  virtual ~ScatterreduceOp() = default;
+
+  virtual Status Execute(std::vector<TensorTableEntry>& entries,
+                         const Response& response) = 0;
+
+  virtual bool Enabled(const ParameterManager& param_manager,
+                       const std::vector<TensorTableEntry>& entries,
+                       const Response& response) const = 0;
+
+protected:
+  virtual void
+  MemcpyInFusionBuffer(const std::vector<TensorTableEntry>& entries,
+                       const void*& fused_input_data, void*& buffer_data,
+                       size_t& buffer_len);
+
+  virtual void MemcpyOutFusionBuffer(const void* buffer_data,
+                                     std::vector<TensorTableEntry>& entries);
+
+  virtual void
+  MemcpyEntryInFusionBuffer(const std::vector<TensorTableEntry>& entries,
+                            const TensorTableEntry& e,
+                            void* buffer_data_at_offset);
+
+  virtual void
+  MemcpyEntryOutFusionBuffer(const std::vector<TensorTableEntry>& entries,
+                             const void* buffer_data_at_offset,
+                             TensorTableEntry& e);
+};
+
 class AllgatherOp : public HorovodOp {
 public:
   AllgatherOp(HorovodGlobalState* global_state);

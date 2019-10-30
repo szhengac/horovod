@@ -39,6 +39,7 @@ std::string GetOpName(const char* prefix, const char* name) {
 static const auto MX_EXEC_CTX = Context();
 static const auto MX_FUNC_PROP = FnProperty::kCPUPrioritized;
 static const char* ALLREDUCE_OP_TYPE_NAME = "horovod_allreduce";
+static const char* SCATTER_REDUCE_OP_TYPE_NAME = "horovod_scatter_reduce";
 static const char* ALLGATHER_OP_TYPE_NAME = "horovod_allgather";
 static const char* BROADCAST_OP_TYPE_NAME = "horovod_broadcast";
 
@@ -55,6 +56,8 @@ inline const char* GetOpTypeName(OperationType op_type) {
   switch (op_type) {
     case OperationType::ALLREDUCE:
       return ALLREDUCE_OP_TYPE_NAME;
+    case OperationType::SCATTER_REDUCE:
+      return SCATTER_REDUCE_OP_TYPE_NAME;
     case OperationType::ALLGATHER:
       return ALLGATHER_OP_TYPE_NAME;
     case OperationType::BROADCAST:
@@ -83,6 +86,14 @@ void DoHorovodOperation(void*, void* on_complete_ptr, void* param) {
     case OperationType::ALLREDUCE:
       hvd_output = std::make_shared<MXTensor<NDArray>>(output);
       enqueue_result = EnqueueTensorAllreduce(
+          hvd_context, hvd_tensor, hvd_output, nullptr, name, device,
+          [on_complete](const Status& status) {
+            InvokeCompleteCallback(on_complete, status);
+      });
+      break;
+    case OperationType::SCATTER_REDUCE:
+      hvd_output = std::make_shared<MXTensor<NDArray>>(output);
+      enqueue_result = EnqueueTensorScatterReduce(
           hvd_context, hvd_tensor, hvd_output, nullptr, name, device,
           [on_complete](const Status& status) {
             InvokeCompleteCallback(on_complete, status);
@@ -160,6 +171,13 @@ void DoHorovodOperationCudaOnCPU(void*, void* on_complete_ptr, void* param) {
             InvokeCompleteCallback(on_complete, status);
       });
       break;
+    case OperationType::SCATTER_REDUCE:
+      enqueue_result = EnqueueTensorScatterReduce(
+          hvd_context, hvd_cpu_buffer, hvd_cpu_buffer, nullptr, name, CPU_DEVICE_ID,
+          [on_complete](const Status& status) {
+            InvokeCompleteCallback(on_complete, status);
+      });
+      break;
     case OperationType::ALLGATHER:
       enqueue_result = EnqueueTensorAllgather(
           hvd_context, hvd_cpu_buffer, nullptr, name, CPU_DEVICE_ID,
@@ -228,6 +246,27 @@ extern "C" int horovod_mxnet_allreduce_async(NDArray* input, NDArray* output,
   if (average) {
     *output /= horovod_size();
   }
+
+  MX_API_END();
+}
+
+extern "C" int horovod_mxnet_scatter_reduce_async(NDArray* input, NDArray* output,
+                                                  const char* name, int priority) {
+  MX_API_BEGIN();
+
+#if HAVE_CUDA && !HOROVOD_GPU_SCATTER_REDUCE
+  if (input->ctx().dev_mask() == cpu::kDevMask &&
+      output->ctx().dev_mask() == cpu::kDevMask) {
+    PushHorovodOperation(OperationType::SCATTER_REDUCE, input, output,
+                         name, priority);
+  } else {
+    PushHorovodOperationCudaOnCPU(OperationType::SCATTER_REDUCE, input, output,
+                                  name, priority);
+  }
+#else
+  PushHorovodOperation(OperationType::SCATTER_REDUCE, input, output,
+                       name, priority);
+#endif
 
   MX_API_END();
 }

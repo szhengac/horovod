@@ -139,6 +139,7 @@ OperationManager* CreateOperationManager(HorovodGlobalState& state) {
   // sequentially from the first to the last. The first 'Enabled' operation will
   // be executed.
   std::vector<std::shared_ptr<AllreduceOp>> allreduce_ops;
+  std::vector<std::shared_ptr<ScatterReduceOp>> scatter_reduce_ops;
   std::vector<std::shared_ptr<AllgatherOp>> allgather_ops;
   std::vector<std::shared_ptr<BroadcastOp>> broadcast_ops;
 
@@ -152,6 +153,9 @@ OperationManager* CreateOperationManager(HorovodGlobalState& state) {
     allreduce_ops.push_back(
         std::shared_ptr<AllreduceOp>(new NCCLHierarchicalAllreduce(
             &nccl_context, &mpi_context, &cuda_context, &state)));
+    scatter_reduce_ops.push_back(
+        std::shared_ptr<AllreduceOp>(new NCCLHierarchicalAllreduce(
+        &nccl_context, &mpi_context, &cuda_context, &state)));
 
 #elif HAVE_DDL && HOROVOD_GPU_ALLREDUCE == 'D'
     allreduce_ops.push_back(std::shared_ptr<AllreduceOp>(
@@ -745,6 +749,43 @@ Status EnqueueTensorAllreduce(std::shared_ptr<OpContext> context,
   message.set_tensor_type(tensor->dtype());
   message.set_device(device);
   message.set_request_type(Request::ALLREDUCE);
+  for (int i = 0; i < tensor->shape().dims(); ++i) {
+    message.add_tensor_shape((int64_t)tensor->shape().dim_size(i));
+  }
+
+  TensorTableEntry e;
+  e.tensor_name = name;
+  e.context = context;
+  e.tensor = tensor;
+  e.output = output;
+  e.ready_event = ready_event;
+  e.device = device;
+  e.callback = callback;
+
+  if (horovod_global.shut_down) {
+    return SHUT_DOWN_ERROR;
+  }
+  Status status = horovod_global.tensor_queue.AddToTensorQueue(e, message);
+  if (status.ok()) {
+    LOG(TRACE, horovod_global.controller->GetRank()) << "Enqueued " << name;
+  }
+  return status;
+}
+
+// Contexts and controller must be initialized and the background thread
+// must be running before this function is called.
+Status EnqueueTensorScatterReduce(std::shared_ptr<OpContext> context,
+                                  std::shared_ptr<Tensor> tensor,
+                                  std::shared_ptr<Tensor> output,
+                                  std::shared_ptr<ReadyEvent> ready_event,
+                                  const std::string name, const int device,
+                                  StatusCallback callback) {
+  Request message;
+  message.set_request_rank(horovod_global.controller->GetRank());
+  message.set_tensor_name(name);
+  message.set_tensor_type(tensor->dtype());
+  message.set_device(device);
+  message.set_request_type(Request::SCATTER_REDUCE);
   for (int i = 0; i < tensor->shape().dims(); ++i) {
     message.add_tensor_shape((int64_t)tensor->shape().dim_size(i));
   }
